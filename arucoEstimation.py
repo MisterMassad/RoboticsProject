@@ -1,6 +1,32 @@
 import argparse
 import numpy as np
 import cv2
+import math
+
+from poseEstNew import estimate_pose_two_images
+
+
+# Angle and Translation calculators
+def rot_to_axis_angle_deg(R):
+    rvec, _ = cv2.Rodrigues(R)
+    angle_rad = float(np.linalg.norm(rvec))
+    angle_deg = float(np.degrees(angle_rad))
+    axis = (rvec.reshape(-1) / (angle_rad + 1e-12)).tolist()
+    return angle_deg, axis
+
+def rotmat_to_euler_deg_zyx(R):
+    sy = math.sqrt(R[0,0]*R[0,0] + R[1,0]*R[1,0])
+    singular = sy < 1e-6
+    if not singular:
+        roll  = math.atan2(R[2,1], R[2,2])
+        pitch = math.atan2(-R[2,0], sy)
+        yaw   = math.atan2(R[1,0], R[0,0])
+    else:
+        roll  = math.atan2(-R[1,2], R[1,1])
+        pitch = math.atan2(-R[2,0], sy)
+        yaw   = 0.0
+    return np.degrees([roll, pitch, yaw])  # roll, pitch, yaw
+
 
 
 # ----------------------------
@@ -168,9 +194,24 @@ def run_core_two_view(img1_bgr, img2_bgr, K):
     Expected return:
         R_core (3x3), t_core (3,), and optionally extra stuff.
     """
-    raise NotImplementedError(
-        "Hook your core pipeline here. See comments in run_core_two_view()."
+def run_core_two_view(img1_bgr, img2_bgr, K):
+    R, t = estimate_pose_two_images(
+        img1_bgr, img2_bgr, K,
+        max_width=2250,
+        nfeatures=2500,
+        ratio_thresh=0.75,
+        max_matches=500,
+        use_symmetry=False,
+        prob=0.999,
+        threshold=1.0,
+        min_E_inliers=10,
+        debug=True,     # keep comparison script clean
+        viz=True,       # no extra windows
+        enable_imshow=False
     )
+    if R is None or t is None:
+        raise RuntimeError("CORE pipeline failed to estimate pose.")
+    return R, np.asarray(t, dtype=np.float64).reshape(3)
 
 
 # ----------------------------
@@ -213,16 +254,8 @@ def main():
     T_cam_marker_1 = Rt_to_T(R1, tvec1)
     T_cam_marker_2 = Rt_to_T(R2, tvec2)
 
-    # Relative motion between the two camera poses:
-    # We want transform from cam1 to cam2 (cam2 <- cam1).
-    # Using marker as common reference:
-    # T_cam1_marker and T_cam2_marker are marker->camera transforms.
-    # Camera pose in marker frame is inverse: T_marker_cam = inv(T_cam_marker).
+    # cam2 <- cam1 using marker as reference
     T_marker_cam1 = invert_T(T_cam_marker_1)
-    T_marker_cam2 = invert_T(T_cam_marker_2)
-
-    # cam2 <- cam1  = (cam2 <- marker) * (marker <- cam1)
-    # cam <- marker is T_cam_marker, marker <- cam is T_marker_cam
     T_cam2_cam1_aruco = T_cam_marker_2 @ T_marker_cam1
 
     R_aruco = T_cam2_cam1_aruco[:3, :3]
@@ -233,45 +266,68 @@ def main():
     print("t_aruco (meters):", t_aruco, "  ||t||=", float(np.linalg.norm(t_aruco)))
     print("===================================================")
 
+    ang_deg, axis = rot_to_axis_angle_deg(R_aruco)
+    roll, pitch, yaw = rotmat_to_euler_deg_zyx(R_aruco)
+
+    print(f"[ARUCO] axis-angle: {ang_deg:.2f} deg axis={axis}")
+    print(f"[ARUCO] euler (roll,pitch,yaw): {roll:.2f}, {pitch:.2f}, {yaw:.2f} deg")
+    print(f"[ARUCO] t (m): {t_aruco}  ||t||={np.linalg.norm(t_aruco):.6f} m")
+    print(f"[ARUCO] t (cm): {t_aruco*100.0}  ||t||={np.linalg.norm(t_aruco)*100.0:.3f} cm")
+
     # --- Core two-view ---
     try:
         R_core, t_core = run_core_two_view(img1, img2, K)
-    except NotImplementedError as e:
+    except NotImplementedError:
         print("\n[CORE] Not connected yet.")
-        print("  Edit run_core_two_view() to call your pipeline and return (R, t).")
         if args.show:
             dbg1 = draw_debug(img1, corners1, ids1, rvec1, tvec1, K, dist, args.marker_length)
             dbg2 = draw_debug(img2, corners2, ids2, rvec2, tvec2, K, dist, args.marker_length)
-            # Resize windos to 900 600
+
             cv2.namedWindow("img1 aruco", cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
             cv2.namedWindow("img2 aruco", cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
-            cv2.resizeWindow("img1 aruco", 1070, 1142)
-            cv2.resizeWindow("img2 aruco", 1070, 1142)
-            
             cv2.imshow("img1 aruco", dbg1)
             cv2.imshow("img2 aruco", dbg2)
+            cv2.resizeWindow("img1 aruco", 900, 600)
+            cv2.resizeWindow("img2 aruco", 900, 600)
+            cv2.moveWindow("img1 aruco", 50, 50)
+            cv2.moveWindow("img2 aruco", 1000, 50)
             cv2.waitKey(0)
         return
 
     t_core = np.asarray(t_core, dtype=np.float64).reshape(3)
+
+    # --- Optional: print CORE in same "human" format ---
+    ang_c, axis_c = rot_to_axis_angle_deg(R_core)
+    r_c, p_c, y_c = rotmat_to_euler_deg_zyx(R_core)
+    print("\n========== CORE RELATIVE (cam2 <- cam1) ==========")
+    print("R_core:\n", R_core)
+    print(f"[CORE] axis-angle: {ang_c:.2f} deg axis={axis_c}")
+    print(f"[CORE] euler (roll,pitch,yaw): {r_c:.2f}, {p_c:.2f}, {y_c:.2f} deg")
+    print(f"[CORE] t (arb): {t_core}  ||t||={np.linalg.norm(t_core):.6f}")
+    print("==================================================")
 
     # --- Compare ---
     # Rotation error between relative rotations
     R_err = R_aruco.T @ R_core
     rot_err_deg = rotation_angle_deg(R_err)
 
-    # Translation direction error (scale-free)
-    tdir_err_deg = angle_between_deg(unit(t_aruco), unit(t_core))
+    # Translation direction error (scale-free), handling sign ambiguity
+    err_pos = angle_between_deg(unit(t_aruco), unit(t_core))
+    err_neg = angle_between_deg(unit(t_aruco), unit(-t_core))
+    use_neg = (err_neg < err_pos)
+    t_core_used = (-t_core) if use_neg else t_core
+    tdir_err_deg = min(err_pos, err_neg)
 
-    # Scale estimate: how much to scale core translation to match ArUco magnitude
-    core_norm = np.linalg.norm(t_core)
-    ar_norm = np.linalg.norm(t_aruco)
+    # Scale estimate (ONLY meaningful for this pair, not a universal truth)
+    core_norm = float(np.linalg.norm(t_core_used))
+    ar_norm = float(np.linalg.norm(t_aruco))
     scale = (ar_norm / core_norm) if core_norm > 1e-12 else float("nan")
 
     print("\n============== CORE vs ARUCO COMPARISON ==============")
     print(f"Rotation error (deg): {rot_err_deg:.4f}")
-    print(f"Translation direction error (deg): {tdir_err_deg:.4f}")
-    print(f"ArUco ||t|| (m): {ar_norm:.6f}")
+    print(f"Translation dir error (deg): {tdir_err_deg:.4f}")
+    print(f"[t sign] err(t)={err_pos:.4f} deg, err(-t)={err_neg:.4f} deg -> using {'-t' if use_neg else '+t'}")
+    print(f"ArUco ||t|| (m): {ar_norm:.6f}  ({ar_norm*100.0:.2f} cm)")
     print(f"Core  ||t|| (arb): {core_norm:.6f}")
     print(f"Estimated scale (m per arb-unit): {scale:.6f}")
     print("======================================================")
@@ -280,25 +336,19 @@ def main():
         dbg1 = draw_debug(img1, corners1, ids1, rvec1, tvec1, K, dist, args.marker_length)
         dbg2 = draw_debug(img2, corners2, ids2, rvec2, tvec2, K, dist, args.marker_length)
 
-        # Create resizable windows (NO image rescale)
         cv2.namedWindow("img1 aruco", cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
         cv2.namedWindow("img2 aruco", cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
 
-        # Show first (important on Windows)
         cv2.imshow("img1 aruco", dbg1)
         cv2.imshow("img2 aruco", dbg2)
 
-        # Then resize the WINDOW (not the image)
         cv2.resizeWindow("img1 aruco", 900, 600)
         cv2.resizeWindow("img2 aruco", 900, 600)
 
-        # Optional: move them so they don't spawn off-screen
         cv2.moveWindow("img1 aruco", 50, 50)
         cv2.moveWindow("img2 aruco", 1000, 50)
 
         cv2.waitKey(0)
-
-
 
 
 if __name__ == "__main__":

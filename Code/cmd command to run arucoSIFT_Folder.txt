@@ -1,0 +1,1 @@
+python arucoSIFT_Folder.py --inputs "C:\Users\Michel Massad\Desktop\Robotics\New Drone Pics" --calib_npz "C:\Users\Michel Massad\Desktop\Robotics\calibration_filtered_drone_new.npz" --marker_length 0.174 --dict DICT_ARUCO_ORIGINAL --pairs 550 --seed 42 --csv_out results.csv

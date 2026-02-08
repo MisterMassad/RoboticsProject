@@ -277,7 +277,8 @@ def save_npz(out_path, K, dist, img_size, rms, reproj_rmse, newK=None, roi=None,
 def main():
     MODE = "images"             # "images" or "video"
     PATTERN_SIZE = (8, 5)       # inner corners (cols, rows)
-    SQUARE_SIZE = 0.03          # meters (3.0 cm)
+    SQUARE_SIZE = 0.03          # meters (3.0 cm) 
+    print(f"Current working directory: {os.getcwd()}")
     OUT_NPZ = "calibration_filtered.npz"
 
     SHOW = True
@@ -286,15 +287,15 @@ def main():
     KEEP_RATIO = 0.6            # keep best 70% views after first calibration
 
     if MODE == "images":
-        IMAGES_GLOB = r"C:\Users\Michel Massad\Desktop\Robotics\Calibration\iPhone16Pro_2\*.JPG"
+        IMAGES_GLOB = r"C:\Users\Michel Massad\Desktop\Robotics\CalibrationImages\iPhone16Pro_2\*.JPG"
         objpoints, imgpoints, img_size = collect_from_images(
             IMAGES_GLOB, PATTERN_SIZE, SQUARE_SIZE, show=SHOW, use_sb=USE_SB
         )
         src = IMAGES_GLOB
     else:
-        VIDEO_PATH = "calib_video.mp4"
+        VIDEO_PATH = r"C:\Users\Michel Massad\Desktop\Robotics\Jan 25 Drone\20260125114743.MP4"
         objpoints, imgpoints, img_size = collect_from_video(
-            VIDEO_PATH, PATTERN_SIZE, SQUARE_SIZE, every_n_frames=10, show=SHOW, use_sb=USE_SB
+            VIDEO_PATH, PATTERN_SIZE, SQUARE_SIZE, every_n_frames=5, show=SHOW, use_sb=USE_SB
         )
         src = VIDEO_PATH
 

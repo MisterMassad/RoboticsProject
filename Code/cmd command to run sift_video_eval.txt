@@ -1,0 +1,1 @@
+python sift_video_eval.py --video "C:\Users\Michel Massad\Desktop\Robotics\20260121164235.MOV" --calib_npz "C:\Users\Michel Massad\Desktop\Robotics\calibration_filtered_drone_video.npz" --marker_length 0.174 --dict DICT_ARUCO_ORIGINAL --stride 15 --preview
